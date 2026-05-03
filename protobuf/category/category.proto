@@ -1,0 +1,97 @@
+syntax = "proto3";
+
+package service.category;
+
+option go_package = "github.com/philandz/philand/protobuf/category";
+
+import "libs/protobuf/common/base.proto";
+import "libs/protobuf/google/api/annotations.proto";
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum CategoryType {
+  CATEGORY_TYPE_UNSPECIFIED = 0;
+  CATEGORY_TYPE_EXPENSE     = 1;
+  CATEGORY_TYPE_INCOME      = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Messages
+// ---------------------------------------------------------------------------
+
+message Category {
+  string id             = 1;
+  string budget_id      = 2;
+  string name           = 3;
+  CategoryType cat_type = 4;
+  string icon           = 5;   // emoji or icon key
+  string color          = 6;   // hex color e.g. "#6366f1"
+  optional int64 planned_amount = 7;
+  int64  actual_spend   = 8;   // computed: sum of entries this month
+  double usage_pct      = 9;   // actual_spend / planned_amount * 100
+  int64  tx_count       = 10;  // total entry count
+  bool   archived       = 11;
+  string created_by     = 12;
+  int64  created_at     = 13;
+  int64  updated_at     = 14;
+}
+
+// ---------------------------------------------------------------------------
+// CRUD requests / responses
+// ---------------------------------------------------------------------------
+
+message CreateCategoryRequest {
+  string budget_id      = 1;
+  string name           = 2;
+  CategoryType cat_type = 3;
+  string icon           = 4;
+  string color          = 5;
+  optional int64 planned_amount = 6;
+}
+
+message UpdateCategoryRequest {
+  string category_id    = 1;
+  optional string name           = 2;
+  optional string icon           = 3;
+  optional string color          = 4;
+  optional int64  planned_amount = 5;
+}
+
+message ArchiveCategoryRequest  { string category_id = 1; }
+message ArchiveCategoryResponse { bool success = 1; }
+
+message DeleteCategoryRequest   { string category_id = 1; }
+message DeleteCategoryResponse  { bool success = 1; }
+
+message GetCategoryRequest      { string category_id = 1; }
+message GetCategoryResponse     { Category category = 1; }
+
+message ListCategoriesRequest   { string budget_id = 1; }
+message ListCategoriesResponse  { repeated Category categories = 1; }
+
+// ---------------------------------------------------------------------------
+// Service
+// ---------------------------------------------------------------------------
+
+service CategoryService {
+  rpc CreateCategory(CreateCategoryRequest) returns (Category) {
+    option (google.api.http) = { post: "/budgets/{budget_id}/categories" body: "*" };
+  }
+  rpc UpdateCategory(UpdateCategoryRequest) returns (Category) {
+    option (google.api.http) = { patch: "/categories/{category_id}" body: "*" };
+  }
+  rpc ArchiveCategory(ArchiveCategoryRequest) returns (ArchiveCategoryResponse) {
+    option (google.api.http) = { patch: "/categories/{category_id}/archive" body: "*" };
+  }
+  rpc DeleteCategory(DeleteCategoryRequest) returns (DeleteCategoryResponse) {
+    option (google.api.http) = { delete: "/categories/{category_id}" };
+  }
+  rpc GetCategory(GetCategoryRequest) returns (GetCategoryResponse) {
+    option (google.api.http) = { get: "/categories/{category_id}" };
+  }
+  rpc ListCategories(ListCategoriesRequest) returns (ListCategoriesResponse) {
+    option (google.api.http) = { get: "/budgets/{budget_id}/categories" };
+  }
+}
