@@ -7,7 +7,9 @@ pub fn category_name(name: &str) -> Result<(), Status> {
         return Err(Status::invalid_argument("Category name must not be empty"));
     }
     if n.len() > 255 {
-        return Err(Status::invalid_argument("Category name must be 255 characters or fewer"));
+        return Err(Status::invalid_argument(
+            "Category name must be 255 characters or fewer",
+        ));
     }
     Ok(())
 }
