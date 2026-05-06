@@ -2,7 +2,7 @@ use tonic::transport::Channel;
 use tonic::Status;
 
 use crate::pb::service::budget::budget_service_client::BudgetServiceClient;
-use crate::pb::service::budget::{CheckRoleRequest, BudgetRole};
+use crate::pb::service::budget::{BudgetRole, CheckRoleRequest};
 
 pub struct BudgetClient {
     inner: BudgetServiceClient<Channel>,
@@ -14,12 +14,19 @@ impl BudgetClient {
             .expect("invalid budget gRPC URL")
             .connect()
             .await?;
-        Ok(Self { inner: BudgetServiceClient::new(channel) })
+        Ok(Self {
+            inner: BudgetServiceClient::new(channel),
+        })
     }
 
     /// Returns the caller's BudgetRole, or Unspecified if not a member.
-    pub async fn check_role(&mut self, user_id: &str, budget_id: &str) -> Result<BudgetRole, Status> {
-        let resp = self.inner
+    pub async fn check_role(
+        &mut self,
+        user_id: &str,
+        budget_id: &str,
+    ) -> Result<BudgetRole, Status> {
+        let resp = self
+            .inner
             .check_role(tonic::Request::new(CheckRoleRequest {
                 user_id: user_id.to_string(),
                 budget_id: budget_id.to_string(),
