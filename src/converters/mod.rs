@@ -1,4 +1,4 @@
-use crate::pb::common::base::Base;
+use crate::pb::common::base::{Base, BaseStatus};
 use crate::pb::service::category::{Category, CategoryType};
 
 // ---------------------------------------------------------------------------
@@ -18,6 +18,7 @@ pub struct DbCategory {
     pub created_by: String,
     pub created_at: i64,
     pub updated_at: i64,
+    pub deleted_at: Option<i64>,
     // computed by JOIN with budget_entries
     pub actual_spend: Option<i64>,
     pub tx_count: Option<i64>,
@@ -60,11 +61,15 @@ pub fn map_category(db: DbCategory) -> Category {
             id: db.id,
             created_at: db.created_at,
             updated_at: db.updated_at,
-            deleted_at: 0,
+            deleted_at: db.deleted_at.unwrap_or(0),
             created_by: db.created_by,
             updated_by: String::new(),
             owner_id: String::new(),
-            status: 0,
+            status: if db.archived {
+                BaseStatus::BsArchived as i32
+            } else {
+                BaseStatus::BsActive as i32
+            },
         }),
         budget_id: db.budget_id,
         name: db.name,
