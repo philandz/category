@@ -27,6 +27,7 @@ impl CategoryRepository {
     // CRUD
     // -----------------------------------------------------------------------
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_category(
         &self,
         budget_id: &str,

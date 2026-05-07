@@ -60,6 +60,7 @@ impl CategoryBiz {
     // CRUD
     // -----------------------------------------------------------------------
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_category(
         &self,
         user_id: &str,
