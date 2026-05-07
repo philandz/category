@@ -54,7 +54,7 @@ impl CategoryRepository {
     pub async fn get_category(&self, category_id: &str) -> Result<DbCategory> {
         let row = sqlx::query_as::<_, DbCategory>(
             "SELECT c.id, c.budget_id, c.name, c.cat_type, c.icon, c.color,
-                    c.planned_amount, c.archived, c.created_by, c.created_at, c.updated_at,
+                    c.planned_amount, c.archived, c.created_by, c.created_at, c.updated_at, c.deleted_at,
                     CAST(COALESCE(SUM(CASE WHEN e.kind = 'expense' THEN e.amount ELSE 0 END), 0) AS SIGNED) AS actual_spend,
                     CAST(COUNT(e.id) AS SIGNED) AS tx_count
              FROM categories c
@@ -70,7 +70,7 @@ impl CategoryRepository {
     pub async fn list_categories(&self, budget_id: &str) -> Result<Vec<DbCategory>> {
         let rows = sqlx::query_as::<_, DbCategory>(
             "SELECT c.id, c.budget_id, c.name, c.cat_type, c.icon, c.color,
-                    c.planned_amount, c.archived, c.created_by, c.created_at, c.updated_at,
+                    c.planned_amount, c.archived, c.created_by, c.created_at, c.updated_at, c.deleted_at,
                     CAST(COALESCE(SUM(CASE WHEN e.kind = 'expense' THEN e.amount ELSE 0 END), 0) AS SIGNED) AS actual_spend,
                     CAST(COUNT(e.id) AS SIGNED) AS tx_count
              FROM categories c
