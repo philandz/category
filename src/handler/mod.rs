@@ -4,15 +4,10 @@ use tonic::{Request, Response, Status};
 use crate::manager::biz::CategoryBiz;
 use crate::manager::validate;
 use crate::pb::service::category::{
-    category_service_server::CategoryService,
-    ArchiveCategoryRequest, ArchiveCategoryResponse,
-    Category,
-    CreateCategoryRequest,
-    DeleteCategoryRequest, DeleteCategoryResponse,
-    GetCategoryRequest, GetCategoryResponse,
-    ListCategoriesRequest, ListCategoriesResponse,
+    category_service_server::CategoryService, ArchiveCategoryRequest, ArchiveCategoryResponse,
+    Category, CategoryType, CreateCategoryRequest, DeleteCategoryRequest, DeleteCategoryResponse,
+    GetCategoryRequest, GetCategoryResponse, ListCategoriesRequest, ListCategoriesResponse,
     UpdateCategoryRequest,
-    CategoryType,
 };
 
 pub struct CategoryHandler {
@@ -20,7 +15,9 @@ pub struct CategoryHandler {
 }
 
 impl CategoryHandler {
-    pub fn new(biz: Arc<CategoryBiz>) -> Self { Self { biz } }
+    pub fn new(biz: Arc<CategoryBiz>) -> Self {
+        Self { biz }
+    }
 }
 
 #[tonic::async_trait]
@@ -33,12 +30,28 @@ impl CategoryService for CategoryHandler {
         let req = request.into_inner();
         validate::category_name(&req.name)?;
         let cat_type = CategoryType::try_from(req.cat_type).unwrap_or(CategoryType::Expense);
-        let icon  = if req.icon.is_empty()  { "📦" } else { &req.icon };
-        let color = if req.color.is_empty() { "#6366f1" } else { &req.color };
-        let cat = self.biz.create_category(
-            &user_id, &req.budget_id, &req.name, cat_type,
-            icon, color, req.planned_amount,
-        ).await?;
+        let icon = if req.icon.is_empty() {
+            "📦"
+        } else {
+            &req.icon
+        };
+        let color = if req.color.is_empty() {
+            "#6366f1"
+        } else {
+            &req.color
+        };
+        let cat = self
+            .biz
+            .create_category(
+                &user_id,
+                &req.budget_id,
+                &req.name,
+                cat_type,
+                icon,
+                color,
+                req.planned_amount,
+            )
+            .await?;
         Ok(Response::new(cat))
     }
 
@@ -48,12 +61,20 @@ impl CategoryService for CategoryHandler {
     ) -> Result<Response<Category>, Status> {
         let user_id = validate::user_id_from_metadata(request.metadata())?;
         let req = request.into_inner();
-        if let Some(ref n) = req.name { validate::category_name(n)?; }
-        let cat = self.biz.update_category(
-            &user_id, &req.category_id,
-            req.name.as_deref(), req.icon.as_deref(), req.color.as_deref(),
-            req.planned_amount,
-        ).await?;
+        if let Some(ref n) = req.name {
+            validate::category_name(n)?;
+        }
+        let cat = self
+            .biz
+            .update_category(
+                &user_id,
+                &req.category_id,
+                req.name.as_deref(),
+                req.icon.as_deref(),
+                req.color.as_deref(),
+                req.planned_amount,
+            )
+            .await?;
         Ok(Response::new(cat))
     }
 
@@ -63,7 +84,9 @@ impl CategoryService for CategoryHandler {
     ) -> Result<Response<ArchiveCategoryResponse>, Status> {
         let user_id = validate::user_id_from_metadata(request.metadata())?;
         let req = request.into_inner();
-        self.biz.archive_category(&user_id, &req.category_id).await?;
+        self.biz
+            .archive_category(&user_id, &req.category_id)
+            .await?;
         Ok(Response::new(ArchiveCategoryResponse { success: true }))
     }
 
@@ -84,7 +107,9 @@ impl CategoryService for CategoryHandler {
         let user_id = validate::user_id_from_metadata(request.metadata())?;
         let req = request.into_inner();
         let cat = self.biz.get_category(&user_id, &req.category_id).await?;
-        Ok(Response::new(GetCategoryResponse { category: Some(cat) }))
+        Ok(Response::new(GetCategoryResponse {
+            category: Some(cat),
+        }))
     }
 
     async fn list_categories(

@@ -1,6 +1,6 @@
 use anyhow::Result;
-use sqlx::MySqlPool;
 use philand_time::now_unix;
+use sqlx::MySqlPool;
 
 use crate::converters::{cat_type_to_db, DbCategory};
 use crate::pb::service::category::CategoryType;
@@ -9,12 +9,15 @@ pub struct CategoryRepository {
     pool: MySqlPool,
 }
 
-fn new_id() -> String { uuid::Uuid::new_v4().to_string() }
+fn new_id() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
 
 impl CategoryRepository {
     pub async fn new(database_url: &str) -> Result<Self> {
         let pool = sqlx::MySqlPool::connect(database_url).await?;
-        let mut migrator = sqlx::migrate::Migrator::new(std::path::Path::new("./migrations")).await?;
+        let mut migrator =
+            sqlx::migrate::Migrator::new(std::path::Path::new("./migrations")).await?;
         migrator.set_ignore_missing(true);
         migrator.run(&pool).await?;
         Ok(Self { pool })
@@ -24,6 +27,7 @@ impl CategoryRepository {
     // CRUD
     // -----------------------------------------------------------------------
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_category(
         &self,
         budget_id: &str,
@@ -90,16 +94,35 @@ impl CategoryRepository {
     ) -> Result<DbCategory> {
         let now = now_unix();
         let mut parts: Vec<String> = vec!["updated_at = ?".to_string()];
-        if name.is_some()           { parts.push("name = ?".to_string()); }
-        if icon.is_some()           { parts.push("icon = ?".to_string()); }
-        if color.is_some()          { parts.push("color = ?".to_string()); }
-        if planned_amount.is_some() { parts.push("planned_amount = ?".to_string()); }
-        let sql = format!("UPDATE categories SET {} WHERE id = ? AND deleted_at IS NULL", parts.join(", "));
+        if name.is_some() {
+            parts.push("name = ?".to_string());
+        }
+        if icon.is_some() {
+            parts.push("icon = ?".to_string());
+        }
+        if color.is_some() {
+            parts.push("color = ?".to_string());
+        }
+        if planned_amount.is_some() {
+            parts.push("planned_amount = ?".to_string());
+        }
+        let sql = format!(
+            "UPDATE categories SET {} WHERE id = ? AND deleted_at IS NULL",
+            parts.join(", ")
+        );
         let mut q = sqlx::query(&sql).bind(now);
-        if let Some(v) = name           { q = q.bind(v); }
-        if let Some(v) = icon           { q = q.bind(v); }
-        if let Some(v) = color          { q = q.bind(v); }
-        if let Some(v) = planned_amount { q = q.bind(v); }
+        if let Some(v) = name {
+            q = q.bind(v);
+        }
+        if let Some(v) = icon {
+            q = q.bind(v);
+        }
+        if let Some(v) = color {
+            q = q.bind(v);
+        }
+        if let Some(v) = planned_amount {
+            q = q.bind(v);
+        }
         q.bind(category_id).execute(&self.pool).await?;
         self.get_category(category_id).await
     }
@@ -107,25 +130,30 @@ impl CategoryRepository {
     pub async fn archive_category(&self, category_id: &str) -> Result<()> {
         let now = now_unix();
         sqlx::query("UPDATE categories SET archived = TRUE, updated_at = ? WHERE id = ?")
-            .bind(now).bind(category_id)
-            .execute(&self.pool).await?;
+            .bind(now)
+            .bind(category_id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
     pub async fn delete_category(&self, category_id: &str) -> Result<()> {
         let now = now_unix();
         sqlx::query("UPDATE categories SET deleted_at = ?, updated_at = ? WHERE id = ?")
-            .bind(now).bind(now).bind(category_id)
-            .execute(&self.pool).await?;
+            .bind(now)
+            .bind(now)
+            .bind(category_id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
     pub async fn get_budget_id(&self, category_id: &str) -> Result<Option<String>> {
-        let row: Option<(String,)> = sqlx::query_as(
-            "SELECT budget_id FROM categories WHERE id = ? AND deleted_at IS NULL"
-        )
-        .bind(category_id)
-        .fetch_optional(&self.pool).await?;
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT budget_id FROM categories WHERE id = ? AND deleted_at IS NULL")
+                .bind(category_id)
+                .fetch_optional(&self.pool)
+                .await?;
         Ok(row.map(|(v,)| v))
     }
 
@@ -137,14 +165,14 @@ impl CategoryRepository {
         let now = now_unix();
         let defaults: &[(&str, &str, &str, &str)] = &[
             // (name, type, icon, color)
-            ("Food & Drink",  "expense", "🍔", "#f59e0b"),
-            ("Transport",     "expense", "🚗", "#06b6d4"),
-            ("Groceries",     "expense", "🛒", "#10b981"),
-            ("Health",        "expense", "💊", "#ef4444"),
+            ("Food & Drink", "expense", "🍔", "#f59e0b"),
+            ("Transport", "expense", "🚗", "#06b6d4"),
+            ("Groceries", "expense", "🛒", "#10b981"),
+            ("Health", "expense", "💊", "#ef4444"),
             ("Entertainment", "expense", "🎮", "#8b5cf6"),
-            ("Utilities",     "expense", "💡", "#6366f1"),
-            ("Salary",        "income",  "💰", "#10b981"),
-            ("Other Income",  "income",  "📥", "#6366f1"),
+            ("Utilities", "expense", "💡", "#6366f1"),
+            ("Salary", "income", "💰", "#10b981"),
+            ("Other Income", "income", "📥", "#6366f1"),
         ];
         for (name, cat_type, icon, color) in defaults {
             let id = new_id();

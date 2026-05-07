@@ -9,7 +9,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
     let mut includes = vec![proto_root.to_string()];
-    for candidate in ["/usr/include", "/usr/local/include", "/opt/homebrew/include"] {
+    for candidate in [
+        "/usr/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+    ] {
         if Path::new(candidate).exists() {
             includes.push(candidate.to_string());
         }
