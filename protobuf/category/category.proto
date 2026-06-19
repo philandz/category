@@ -22,17 +22,17 @@ enum CategoryType {
 // ---------------------------------------------------------------------------
 
 message Category {
-  common.base.Base base         = 1;
-  string           budget_id   = 2;
-  string           name        = 3;
-  CategoryType     cat_type   = 4;
-  string           icon        = 5;   // emoji or icon key
-  string           color       = 6;   // hex color e.g. "#6366f1"
-  optional int64   planned_amount = 7;
-  int64            actual_spend = 8;   // computed: sum of entries this month
-  double           usage_pct  = 9;   // actual_spend / planned_amount * 100
-  int64            tx_count   = 10;  // total entry count
-  bool             archived   = 11;
+  common.base.Base base             = 1;
+  string           budget_id        = 2;
+  string           name             = 3;
+  CategoryType     cat_type         = 4;
+  string           icon             = 5;   // emoji or icon key
+  string           color            = 6;   // hex color e.g. "#6366f1"
+  optional int64   planned_amount   = 7;
+  int64            actual_spend     = 8;   // computed: sum of entries this month
+  double           usage_pct       = 9;   // actual_spend / planned_amount * 100
+  int64            tx_count        = 10;  // total entry count
+  bool             archived        = 11;
 }
 
 // ---------------------------------------------------------------------------
@@ -68,6 +68,13 @@ message GetCategoryResponse     { Category category = 1; }
 message ListCategoriesRequest   { string budget_id = 1; }
 message ListCategoriesResponse  { repeated Category categories = 1; }
 
+// Admin: list categories for any budget (super_admin only)
+message ListCategoriesAdminRequest {
+  string budget_id = 1;
+  string cat_type = 2;  // filter by category type: "expense", "income", or "" for all
+}
+message ListCategoriesAdminResponse { repeated Category categories = 1; }
+
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
@@ -91,4 +98,6 @@ service CategoryService {
   rpc ListCategories(ListCategoriesRequest) returns (ListCategoriesResponse) {
     option (google.api.http) = { get: "/budgets/{budget_id}/categories" };
   }
+  // Admin: list categories for any budget (super_admin only)
+  rpc ListCategoriesAdmin(ListCategoriesAdminRequest) returns (ListCategoriesAdminResponse) {}
 }
