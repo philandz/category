@@ -1,5 +1,5 @@
 use anyhow::Result;
-use philand_time::now_unix;
+use chrono::Utc;
 use sqlx::MySqlPool;
 
 use crate::converters::{cat_type_to_db, DbCategory};
@@ -19,7 +19,31 @@ impl CategoryRepository {
         let mut migrator =
             sqlx::migrate::Migrator::new(std::path::Path::new("./migrations")).await?;
         migrator.set_ignore_missing(true);
-        migrator.run(&pool).await?;
+
+        if let Err(e) = migrator.run(&pool).await {
+            let err_str = format!("{}", e);
+            if err_str.contains("partially applied") && err_str.contains("20260527065921") {
+                tracing::warn!("Migration 20260527065921 partially applied, checking if cat_type column exists...");
+                let has_cat_type: bool = sqlx::query_scalar(
+                    "SELECT COUNT(*) > 0 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'categories' AND COLUMN_NAME = 'cat_type'"
+                )
+                .fetch_one(&pool)
+                .await.unwrap_or(false);
+
+                if has_cat_type {
+                    tracing::warn!("cat_type column exists, manually marking migration as complete");
+                    sqlx::query(
+                        "INSERT IGNORE INTO _sqlx_migrations (version, description, installed_on, success, checksum, execution_time) VALUES (20260527065921, 'add cat_type column', NOW(), true, 0x00, 0)"
+                    )
+                    .execute(&pool)
+                    .await.ok();
+                } else {
+                    return Err(anyhow::anyhow!("{}", e));
+                }
+            } else {
+                return Err(anyhow::anyhow!("{}", e));
+            }
+        }
         Ok(Self { pool })
     }
 
@@ -39,7 +63,7 @@ impl CategoryRepository {
         created_by: &str,
     ) -> Result<DbCategory> {
         let id = new_id();
-        let now = now_unix();
+        let now = Utc::now().timestamp();
         let type_str = cat_type_to_db(cat_type);
         sqlx::query(
             "INSERT INTO categories (id, budget_id, name, cat_type, icon, color, planned_amount, archived, created_by, created_at, updated_at)
@@ -55,10 +79,10 @@ impl CategoryRepository {
         let row = sqlx::query_as::<_, DbCategory>(
             "SELECT c.id, c.budget_id, c.name, c.cat_type, c.icon, c.color,
                     c.planned_amount, c.archived, c.created_by, c.created_at, c.updated_at, c.deleted_at,
-                    CAST(COALESCE(SUM(CASE WHEN e.kind = 'expense' THEN e.amount ELSE 0 END), 0) AS SIGNED) AS actual_spend,
+                    CAST(COALESCE(SUM(CASE WHEN e.kind = 'expense' THEN e.amount_minor ELSE 0 END), 0) AS SIGNED) AS actual_spend,
                     CAST(COUNT(e.id) AS SIGNED) AS tx_count
              FROM categories c
-             LEFT JOIN budget_entries e ON e.category_id = c.id AND e.deleted_at IS NULL
+             LEFT JOIN entries e ON e.category_id = c.id AND e.deleted_at IS NULL
              WHERE c.id = ? AND c.deleted_at IS NULL
              GROUP BY c.id"
         )
@@ -71,16 +95,49 @@ impl CategoryRepository {
         let rows = sqlx::query_as::<_, DbCategory>(
             "SELECT c.id, c.budget_id, c.name, c.cat_type, c.icon, c.color,
                     c.planned_amount, c.archived, c.created_by, c.created_at, c.updated_at, c.deleted_at,
-                    CAST(COALESCE(SUM(CASE WHEN e.kind = 'expense' THEN e.amount ELSE 0 END), 0) AS SIGNED) AS actual_spend,
+                    CAST(COALESCE(SUM(CASE
+                        WHEN c.cat_type = 'expense' AND e.kind = 'expense' THEN e.amount_minor
+                        WHEN c.cat_type = 'income' AND e.kind = 'income' THEN e.amount_minor
+                        ELSE 0 END), 0) AS SIGNED) AS actual_spend,
                     CAST(COUNT(e.id) AS SIGNED) AS tx_count
              FROM categories c
-             LEFT JOIN budget_entries e ON e.category_id = c.id AND e.deleted_at IS NULL
+             LEFT JOIN entries e ON e.category_id = c.id AND e.deleted_at IS NULL
              WHERE c.budget_id = ? AND c.deleted_at IS NULL
              GROUP BY c.id
              ORDER BY c.cat_type ASC, c.name ASC"
         )
         .bind(budget_id)
         .fetch_all(&self.pool).await?;
+        Ok(rows)
+    }
+
+    // Admin: list categories with optional type filter
+    pub async fn list_categories_admin(&self, budget_id: &str, cat_type: &str) -> Result<Vec<DbCategory>> {
+        let cat_type_filter = if cat_type.is_empty() {
+            String::new()
+        } else {
+            format!(" AND c.cat_type = '{}'", cat_type)
+        };
+
+        let query = format!(
+            "SELECT c.id, c.budget_id, c.name, c.cat_type, c.icon, c.color,
+                    c.planned_amount, c.archived, c.created_by, c.created_at, c.updated_at, c.deleted_at,
+                    CAST(COALESCE(SUM(CASE
+                        WHEN c.cat_type = 'expense' AND e.kind = 'expense' THEN e.amount_minor
+                        WHEN c.cat_type = 'income' AND e.kind = 'income' THEN e.amount_minor
+                        ELSE 0 END), 0) AS SIGNED) AS actual_spend,
+                    CAST(COUNT(e.id) AS SIGNED) AS tx_count
+             FROM categories c
+             LEFT JOIN entries e ON e.category_id = c.id AND e.deleted_at IS NULL
+             WHERE c.budget_id = ? AND c.deleted_at IS NULL{}
+             GROUP BY c.id
+             ORDER BY c.cat_type ASC, c.name ASC",
+            cat_type_filter
+        );
+
+        let rows = sqlx::query_as::<_, DbCategory>(&query)
+            .bind(budget_id)
+            .fetch_all(&self.pool).await?;
         Ok(rows)
     }
 
@@ -92,7 +149,7 @@ impl CategoryRepository {
         color: Option<&str>,
         planned_amount: Option<i64>,
     ) -> Result<DbCategory> {
-        let now = now_unix();
+        let now = Utc::now().timestamp();
         let mut parts: Vec<String> = vec!["updated_at = ?".to_string()];
         if name.is_some() {
             parts.push("name = ?".to_string());
@@ -128,7 +185,7 @@ impl CategoryRepository {
     }
 
     pub async fn archive_category(&self, category_id: &str) -> Result<()> {
-        let now = now_unix();
+        let now = Utc::now().timestamp();
         sqlx::query("UPDATE categories SET archived = TRUE, updated_at = ? WHERE id = ?")
             .bind(now)
             .bind(category_id)
@@ -138,7 +195,7 @@ impl CategoryRepository {
     }
 
     pub async fn delete_category(&self, category_id: &str) -> Result<()> {
-        let now = now_unix();
+        let now = Utc::now().timestamp();
         sqlx::query("UPDATE categories SET deleted_at = ?, updated_at = ? WHERE id = ?")
             .bind(now)
             .bind(now)
@@ -162,7 +219,7 @@ impl CategoryRepository {
     // -----------------------------------------------------------------------
 
     pub async fn seed_defaults(&self, budget_id: &str, created_by: &str) -> Result<()> {
-        let now = now_unix();
+        let now = Utc::now().timestamp();
         let defaults: &[(&str, &str, &str, &str)] = &[
             // (name, type, icon, color)
             ("Food & Drink", "expense", "🍔", "#f59e0b"),
