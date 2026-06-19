@@ -6,8 +6,8 @@ use crate::manager::validate;
 use crate::pb::service::category::{
     category_service_server::CategoryService, ArchiveCategoryRequest, ArchiveCategoryResponse,
     Category, CategoryType, CreateCategoryRequest, DeleteCategoryRequest, DeleteCategoryResponse,
-    GetCategoryRequest, GetCategoryResponse, ListCategoriesRequest, ListCategoriesResponse,
-    UpdateCategoryRequest,
+    GetCategoryRequest, GetCategoryResponse, ListCategoriesAdminRequest, ListCategoriesAdminResponse,
+    ListCategoriesRequest, ListCategoriesResponse, UpdateCategoryRequest,
 };
 
 pub struct CategoryHandler {
@@ -20,13 +20,14 @@ impl CategoryHandler {
     }
 }
 
-#[tonic::async_trait]
+    #[tonic::async_trait]
 impl CategoryService for CategoryHandler {
     async fn create_category(
         &self,
         request: Request<CreateCategoryRequest>,
     ) -> Result<Response<Category>, Status> {
         let user_id = validate::user_id_from_metadata(request.metadata())?;
+        let user_type = validate::user_type_from_metadata(request.metadata());
         let req = request.into_inner();
         validate::category_name(&req.name)?;
         let cat_type = CategoryType::try_from(req.cat_type).unwrap_or(CategoryType::Expense);
@@ -50,6 +51,7 @@ impl CategoryService for CategoryHandler {
                 icon,
                 color,
                 req.planned_amount,
+                user_type.as_deref(),
             )
             .await?;
         Ok(Response::new(cat))
@@ -60,6 +62,7 @@ impl CategoryService for CategoryHandler {
         request: Request<UpdateCategoryRequest>,
     ) -> Result<Response<Category>, Status> {
         let user_id = validate::user_id_from_metadata(request.metadata())?;
+        let user_type = validate::user_type_from_metadata(request.metadata());
         let req = request.into_inner();
         if let Some(ref n) = req.name {
             validate::category_name(n)?;
@@ -73,6 +76,7 @@ impl CategoryService for CategoryHandler {
                 req.icon.as_deref(),
                 req.color.as_deref(),
                 req.planned_amount,
+                user_type.as_deref(),
             )
             .await?;
         Ok(Response::new(cat))
@@ -83,9 +87,10 @@ impl CategoryService for CategoryHandler {
         request: Request<ArchiveCategoryRequest>,
     ) -> Result<Response<ArchiveCategoryResponse>, Status> {
         let user_id = validate::user_id_from_metadata(request.metadata())?;
+        let user_type = validate::user_type_from_metadata(request.metadata());
         let req = request.into_inner();
         self.biz
-            .archive_category(&user_id, &req.category_id)
+            .archive_category(&user_id, &req.category_id, user_type.as_deref())
             .await?;
         Ok(Response::new(ArchiveCategoryResponse { success: true }))
     }
@@ -95,8 +100,11 @@ impl CategoryService for CategoryHandler {
         request: Request<DeleteCategoryRequest>,
     ) -> Result<Response<DeleteCategoryResponse>, Status> {
         let user_id = validate::user_id_from_metadata(request.metadata())?;
+        let user_type = validate::user_type_from_metadata(request.metadata());
         let req = request.into_inner();
-        self.biz.delete_category(&user_id, &req.category_id).await?;
+        self.biz
+            .delete_category(&user_id, &req.category_id, user_type.as_deref())
+            .await?;
         Ok(Response::new(DeleteCategoryResponse { success: true }))
     }
 
@@ -105,8 +113,12 @@ impl CategoryService for CategoryHandler {
         request: Request<GetCategoryRequest>,
     ) -> Result<Response<GetCategoryResponse>, Status> {
         let user_id = validate::user_id_from_metadata(request.metadata())?;
+        let user_type = validate::user_type_from_metadata(request.metadata());
         let req = request.into_inner();
-        let cat = self.biz.get_category(&user_id, &req.category_id).await?;
+        let cat = self
+            .biz
+            .get_category(&user_id, &req.category_id, user_type.as_deref())
+            .await?;
         Ok(Response::new(GetCategoryResponse {
             category: Some(cat),
         }))
@@ -117,8 +129,21 @@ impl CategoryService for CategoryHandler {
         request: Request<ListCategoriesRequest>,
     ) -> Result<Response<ListCategoriesResponse>, Status> {
         let user_id = validate::user_id_from_metadata(request.metadata())?;
+        let user_type = validate::user_type_from_metadata(request.metadata());
         let req = request.into_inner();
-        let categories = self.biz.list_categories(&user_id, &req.budget_id).await?;
+        let categories = self
+            .biz
+            .list_categories(&user_id, &req.budget_id, user_type.as_deref())
+            .await?;
         Ok(Response::new(ListCategoriesResponse { categories }))
+    }
+
+    async fn list_categories_admin(
+        &self,
+        request: Request<ListCategoriesAdminRequest>,
+    ) -> Result<Response<ListCategoriesAdminResponse>, Status> {
+        let req = request.into_inner();
+        let categories = self.biz.list_categories_admin(&req.budget_id, &req.cat_type).await?;
+        Ok(Response::new(ListCategoriesAdminResponse { categories }))
     }
 }
