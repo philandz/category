@@ -25,7 +25,7 @@ message Category {
   common.base.Base base             = 1;
   string           budget_id        = 2;
   string           name             = 3;
-  CategoryType     cat_type         = 4;
+  CategoryType     kind             = 4;
   string           icon             = 5;   // emoji or icon key
   string           color            = 6;   // hex color e.g. "#6366f1"
   optional int64   planned_amount   = 7;
@@ -42,7 +42,7 @@ message Category {
 message CreateCategoryRequest {
   string budget_id      = 1;
   string name           = 2;
-  CategoryType cat_type = 3;
+  CategoryType kind = 3;
   string icon           = 4;
   string color          = 5;
   optional int64 planned_amount = 6;
@@ -71,7 +71,7 @@ message ListCategoriesResponse  { repeated Category categories = 1; }
 // Admin: list categories for any budget (super_admin only)
 message ListCategoriesAdminRequest {
   string budget_id = 1;
-  string cat_type = 2;  // filter by category type: "expense", "income", or "" for all
+  string kind = 2;  // filter by category type: "expense", "income", or "" for all
 }
 message ListCategoriesAdminResponse { repeated Category categories = 1; }
 

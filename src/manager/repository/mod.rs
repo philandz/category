@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::Utc;
 use sqlx::MySqlPool;
 
-use crate::converters::{cat_type_to_db, DbCategory};
+use crate::converters::{kind_to_db, DbCategory};
 use crate::pb::service::category::CategoryType;
 
 pub struct CategoryRepository {
@@ -20,30 +20,7 @@ impl CategoryRepository {
             sqlx::migrate::Migrator::new(std::path::Path::new("./migrations")).await?;
         migrator.set_ignore_missing(true);
 
-        if let Err(e) = migrator.run(&pool).await {
-            let err_str = format!("{}", e);
-            if err_str.contains("partially applied") && err_str.contains("20260527065921") {
-                tracing::warn!("Migration 20260527065921 partially applied, checking if cat_type column exists...");
-                let has_cat_type: bool = sqlx::query_scalar(
-                    "SELECT COUNT(*) > 0 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'categories' AND COLUMN_NAME = 'cat_type'"
-                )
-                .fetch_one(&pool)
-                .await.unwrap_or(false);
-
-                if has_cat_type {
-                    tracing::warn!("cat_type column exists, manually marking migration as complete");
-                    sqlx::query(
-                        "INSERT IGNORE INTO _sqlx_migrations (version, description, installed_on, success, checksum, execution_time) VALUES (20260527065921, 'add cat_type column', NOW(), true, 0x00, 0)"
-                    )
-                    .execute(&pool)
-                    .await.ok();
-                } else {
-                    return Err(anyhow::anyhow!("{}", e));
-                }
-            } else {
-                return Err(anyhow::anyhow!("{}", e));
-            }
-        }
+        migrator.run(&pool).await?;
         Ok(Self { pool })
     }
 
@@ -64,9 +41,9 @@ impl CategoryRepository {
     ) -> Result<DbCategory> {
         let id = new_id();
         let now = Utc::now().timestamp();
-        let type_str = cat_type_to_db(cat_type);
+        let type_str = kind_to_db(cat_type);
         sqlx::query(
-            "INSERT INTO categories (id, budget_id, name, cat_type, icon, color, planned_amount, archived, created_by, created_at, updated_at)
+            "INSERT INTO categories (id, budget_id, name, kind, icon, color, planned_amount, archived, created_by, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, FALSE, ?, ?, ?)"
         )
         .bind(&id).bind(budget_id).bind(name).bind(type_str).bind(icon).bind(color)
@@ -77,7 +54,7 @@ impl CategoryRepository {
 
     pub async fn get_category(&self, category_id: &str) -> Result<DbCategory> {
         let row = sqlx::query_as::<_, DbCategory>(
-            "SELECT c.id, c.budget_id, c.name, c.cat_type, c.icon, c.color,
+            "SELECT c.id, c.budget_id, c.name, c.kind, c.icon, c.color,
                     c.planned_amount, c.archived, c.created_by, c.created_at, c.updated_at, c.deleted_at,
                     CAST(COALESCE(SUM(CASE WHEN e.kind = 'expense' THEN e.amount_minor ELSE 0 END), 0) AS SIGNED) AS actual_spend,
                     CAST(COUNT(e.id) AS SIGNED) AS tx_count
@@ -93,18 +70,18 @@ impl CategoryRepository {
 
     pub async fn list_categories(&self, budget_id: &str) -> Result<Vec<DbCategory>> {
         let rows = sqlx::query_as::<_, DbCategory>(
-            "SELECT c.id, c.budget_id, c.name, c.cat_type, c.icon, c.color,
+            "SELECT c.id, c.budget_id, c.name, c.kind, c.icon, c.color,
                     c.planned_amount, c.archived, c.created_by, c.created_at, c.updated_at, c.deleted_at,
                     CAST(COALESCE(SUM(CASE
-                        WHEN c.cat_type = 'expense' AND e.kind = 'expense' THEN e.amount_minor
-                        WHEN c.cat_type = 'income' AND e.kind = 'income' THEN e.amount_minor
+                        WHEN c.kind = 'expense' AND e.kind = 'expense' THEN e.amount_minor
+                        WHEN c.kind = 'income' AND e.kind = 'income' THEN e.amount_minor
                         ELSE 0 END), 0) AS SIGNED) AS actual_spend,
                     CAST(COUNT(e.id) AS SIGNED) AS tx_count
              FROM categories c
              LEFT JOIN entries e ON e.category_id = c.id AND e.deleted_at IS NULL
              WHERE c.budget_id = ? AND c.deleted_at IS NULL
              GROUP BY c.id
-             ORDER BY c.cat_type ASC, c.name ASC"
+             ORDER BY c.kind ASC, c.name ASC"
         )
         .bind(budget_id)
         .fetch_all(&self.pool).await?;
@@ -116,22 +93,22 @@ impl CategoryRepository {
         let cat_type_filter = if cat_type.is_empty() {
             String::new()
         } else {
-            format!(" AND c.cat_type = '{}'", cat_type)
+            format!(" AND c.kind = '{}'", cat_type)
         };
 
         let query = format!(
-            "SELECT c.id, c.budget_id, c.name, c.cat_type, c.icon, c.color,
+            "SELECT c.id, c.budget_id, c.name, c.kind, c.icon, c.color,
                     c.planned_amount, c.archived, c.created_by, c.created_at, c.updated_at, c.deleted_at,
                     CAST(COALESCE(SUM(CASE
-                        WHEN c.cat_type = 'expense' AND e.kind = 'expense' THEN e.amount_minor
-                        WHEN c.cat_type = 'income' AND e.kind = 'income' THEN e.amount_minor
+                        WHEN c.kind = 'expense' AND e.kind = 'expense' THEN e.amount_minor
+                        WHEN c.kind = 'income' AND e.kind = 'income' THEN e.amount_minor
                         ELSE 0 END), 0) AS SIGNED) AS actual_spend,
                     CAST(COUNT(e.id) AS SIGNED) AS tx_count
              FROM categories c
              LEFT JOIN entries e ON e.category_id = c.id AND e.deleted_at IS NULL
              WHERE c.budget_id = ? AND c.deleted_at IS NULL{}
              GROUP BY c.id
-             ORDER BY c.cat_type ASC, c.name ASC",
+             ORDER BY c.kind ASC, c.name ASC",
             cat_type_filter
         );
 
@@ -234,7 +211,7 @@ impl CategoryRepository {
         for (name, cat_type, icon, color) in defaults {
             let id = new_id();
             sqlx::query(
-                "INSERT IGNORE INTO categories (id, budget_id, name, cat_type, icon, color, archived, created_by, created_at, updated_at)
+                "INSERT IGNORE INTO categories (id, budget_id, name, kind, icon, color, archived, created_by, created_at, updated_at)
                  VALUES (?, ?, ?, ?, ?, ?, FALSE, ?, ?, ?)"
             )
             .bind(&id).bind(budget_id).bind(name).bind(cat_type).bind(icon).bind(color)

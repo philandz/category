@@ -30,7 +30,7 @@ impl CategoryService for CategoryHandler {
         let user_type = validate::user_type_from_metadata(request.metadata());
         let req = request.into_inner();
         validate::category_name(&req.name)?;
-        let cat_type = CategoryType::try_from(req.cat_type).unwrap_or(CategoryType::Expense);
+        let kind = CategoryType::try_from(req.kind).unwrap_or(CategoryType::Expense);
         let icon = if req.icon.is_empty() {
             "📦"
         } else {
@@ -47,7 +47,7 @@ impl CategoryService for CategoryHandler {
                 &user_id,
                 &req.budget_id,
                 &req.name,
-                cat_type,
+                kind,
                 icon,
                 color,
                 req.planned_amount,
@@ -143,7 +143,7 @@ impl CategoryService for CategoryHandler {
         request: Request<ListCategoriesAdminRequest>,
     ) -> Result<Response<ListCategoriesAdminResponse>, Status> {
         let req = request.into_inner();
-        let categories = self.biz.list_categories_admin(&req.budget_id, &req.cat_type).await?;
+        let categories = self.biz.list_categories_admin(&req.budget_id, &req.kind).await?;
         Ok(Response::new(ListCategoriesAdminResponse { categories }))
     }
 }
