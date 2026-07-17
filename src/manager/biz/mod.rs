@@ -30,12 +30,17 @@ impl CategoryBiz {
     // Role helpers
     // -----------------------------------------------------------------------
 
-    async fn assert_member(&self, budget_id: &str, user_id: &str) -> Result<(), Status> {
+    async fn assert_member(
+        &self,
+        budget_id: &str,
+        user_id: &str,
+        user_type: Option<&str>,
+    ) -> Result<(), Status> {
         let role = self
             .budget_client
             .lock()
             .await
-            .check_role(user_id, budget_id)
+            .check_role(user_id, budget_id, user_type)
             .await?;
         if role == BudgetRole::Unspecified {
             return Err(Status::permission_denied("Not a member of this budget"));
@@ -43,12 +48,17 @@ impl CategoryBiz {
         Ok(())
     }
 
-    async fn assert_manager(&self, budget_id: &str, user_id: &str) -> Result<(), Status> {
+    async fn assert_manager(
+        &self,
+        budget_id: &str,
+        user_id: &str,
+        user_type: Option<&str>,
+    ) -> Result<(), Status> {
         let role = self
             .budget_client
             .lock()
             .await
-            .check_role(user_id, budget_id)
+            .check_role(user_id, budget_id, user_type)
             .await?;
         if !matches!(role, BudgetRole::Owner | BudgetRole::Manager) {
             return Err(Status::permission_denied("Requires Manager role or higher"));
@@ -70,8 +80,9 @@ impl CategoryBiz {
         icon: &str,
         color: &str,
         planned_amount: Option<i64>,
+        user_type: Option<&str>,
     ) -> Result<Category, Status> {
-        self.assert_manager(budget_id, user_id).await?;
+        self.assert_manager(budget_id, user_id, user_type).await?;
         let db = self
             .repo
             .create_category(
@@ -96,6 +107,7 @@ impl CategoryBiz {
         icon: Option<&str>,
         color: Option<&str>,
         planned_amount: Option<i64>,
+        user_type: Option<&str>,
     ) -> Result<Category, Status> {
         let budget_id = self
             .repo
@@ -103,7 +115,7 @@ impl CategoryBiz {
             .await
             .map_err(Self::internal)?
             .ok_or_else(|| Status::not_found("Category not found"))?;
-        self.assert_manager(&budget_id, user_id).await?;
+        self.assert_manager(&budget_id, user_id, user_type).await?;
         let db = self
             .repo
             .update_category(category_id, name, icon, color, planned_amount)
@@ -112,41 +124,56 @@ impl CategoryBiz {
         Ok(map_category(db))
     }
 
-    pub async fn archive_category(&self, user_id: &str, category_id: &str) -> Result<(), Status> {
+    pub async fn archive_category(
+        &self,
+        user_id: &str,
+        category_id: &str,
+        user_type: Option<&str>,
+    ) -> Result<(), Status> {
         let budget_id = self
             .repo
             .get_budget_id(category_id)
             .await
             .map_err(Self::internal)?
             .ok_or_else(|| Status::not_found("Category not found"))?;
-        self.assert_manager(&budget_id, user_id).await?;
+        self.assert_manager(&budget_id, user_id, user_type).await?;
         self.repo
             .archive_category(category_id)
             .await
             .map_err(Self::internal)
     }
 
-    pub async fn delete_category(&self, user_id: &str, category_id: &str) -> Result<(), Status> {
+    pub async fn delete_category(
+        &self,
+        user_id: &str,
+        category_id: &str,
+        user_type: Option<&str>,
+    ) -> Result<(), Status> {
         let budget_id = self
             .repo
             .get_budget_id(category_id)
             .await
             .map_err(Self::internal)?
             .ok_or_else(|| Status::not_found("Category not found"))?;
-        self.assert_manager(&budget_id, user_id).await?;
+        self.assert_manager(&budget_id, user_id, user_type).await?;
         self.repo
             .delete_category(category_id)
             .await
             .map_err(Self::internal)
     }
 
-    pub async fn get_category(&self, user_id: &str, category_id: &str) -> Result<Category, Status> {
+    pub async fn get_category(
+        &self,
+        user_id: &str,
+        category_id: &str,
+        user_type: Option<&str>,
+    ) -> Result<Category, Status> {
         let db = self
             .repo
             .get_category(category_id)
             .await
             .map_err(|_| Status::not_found("Category not found"))?;
-        self.assert_member(&db.budget_id, user_id).await?;
+        self.assert_member(&db.budget_id, user_id, user_type).await?;
         Ok(map_category(db))
     }
 
@@ -154,11 +181,26 @@ impl CategoryBiz {
         &self,
         user_id: &str,
         budget_id: &str,
+        user_type: Option<&str>,
     ) -> Result<Vec<Category>, Status> {
-        self.assert_member(budget_id, user_id).await?;
+        self.assert_member(budget_id, user_id, user_type).await?;
         let rows = self
             .repo
             .list_categories(budget_id)
+            .await
+            .map_err(Self::internal)?;
+        Ok(rows.into_iter().map(map_category).collect())
+    }
+
+    // Admin: list all categories for a budget (no membership check)
+    pub async fn list_categories_admin(
+        &self,
+        budget_id: &str,
+        cat_type: &str,
+    ) -> Result<Vec<Category>, Status> {
+        let rows = self
+            .repo
+            .list_categories_admin(budget_id, cat_type)
             .await
             .map_err(Self::internal)?;
         Ok(rows.into_iter().map(map_category).collect())

@@ -10,7 +10,7 @@ pub struct DbCategory {
     pub id: String,
     pub budget_id: String,
     pub name: String,
-    pub cat_type: String,
+    pub kind: String,
     pub icon: String,
     pub color: String,
     pub planned_amount: Option<i64>,
@@ -28,7 +28,7 @@ pub struct DbCategory {
 // String ↔ Enum helpers
 // ---------------------------------------------------------------------------
 
-pub fn cat_type_to_db(t: CategoryType) -> &'static str {
+pub fn kind_to_db(t: CategoryType) -> &'static str {
     match t {
         CategoryType::Expense => "expense",
         CategoryType::Income => "income",
@@ -36,7 +36,7 @@ pub fn cat_type_to_db(t: CategoryType) -> &'static str {
     }
 }
 
-pub fn cat_type_from_db(s: &str) -> CategoryType {
+pub fn kind_from_db(s: &str) -> CategoryType {
     match s {
         "income" => CategoryType::Income,
         _ => CategoryType::Expense,
@@ -73,7 +73,7 @@ pub fn map_category(db: DbCategory) -> Category {
         }),
         budget_id: db.budget_id,
         name: db.name,
-        cat_type: cat_type_from_db(&db.cat_type) as i32,
+        kind: kind_from_db(&db.kind) as i32,
         icon: db.icon,
         color: db.color,
         planned_amount: db.planned_amount,

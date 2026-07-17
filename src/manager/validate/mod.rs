@@ -21,3 +21,10 @@ pub fn user_id_from_metadata(meta: &tonic::metadata::MetadataMap) -> Result<Stri
         .filter(|s| !s.is_empty())
         .ok_or_else(|| Status::unauthenticated("missing x-user-id metadata"))
 }
+
+pub fn user_type_from_metadata(meta: &tonic::metadata::MetadataMap) -> Option<String> {
+    meta.get("x-user-type")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+        .filter(|s| !s.is_empty())
+}

@@ -1,5 +1,6 @@
+use tonic::metadata::MetadataValue;
 use tonic::transport::Channel;
-use tonic::Status;
+use tonic::{Request, Status};
 
 use crate::pb::service::budget::budget_service_client::BudgetServiceClient;
 use crate::pb::service::budget::{BudgetRole, CheckRoleRequest};
@@ -19,19 +20,25 @@ impl BudgetClient {
         })
     }
 
-    /// Returns the caller's BudgetRole, or Unspecified if not a member.
     pub async fn check_role(
         &mut self,
         user_id: &str,
         budget_id: &str,
+        user_type: Option<&str>,
     ) -> Result<BudgetRole, Status> {
-        let resp = self
-            .inner
-            .check_role(tonic::Request::new(CheckRoleRequest {
-                user_id: user_id.to_string(),
-                budget_id: budget_id.to_string(),
-            }))
-            .await?;
+        let mut req = Request::new(CheckRoleRequest {
+            user_id: user_id.to_string(),
+            budget_id: budget_id.to_string(),
+        });
+        if let Ok(v) = MetadataValue::try_from(user_id) {
+            req.metadata_mut().insert("x-user-id", v);
+        }
+        if let Some(ut) = user_type {
+            if let Ok(v) = MetadataValue::try_from(ut) {
+                req.metadata_mut().insert("x-user-type", v);
+            }
+        }
+        let resp = self.inner.check_role(req).await?;
         Ok(BudgetRole::try_from(resp.into_inner().role).unwrap_or(BudgetRole::Unspecified))
     }
 }
