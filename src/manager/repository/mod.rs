@@ -89,7 +89,11 @@ impl CategoryRepository {
     }
 
     // Admin: list categories with optional type filter
-    pub async fn list_categories_admin(&self, budget_id: &str, cat_type: &str) -> Result<Vec<DbCategory>> {
+    pub async fn list_categories_admin(
+        &self,
+        budget_id: &str,
+        cat_type: &str,
+    ) -> Result<Vec<DbCategory>> {
         let cat_type_filter = if cat_type.is_empty() {
             String::new()
         } else {
@@ -114,7 +118,8 @@ impl CategoryRepository {
 
         let rows = sqlx::query_as::<_, DbCategory>(&query)
             .bind(budget_id)
-            .fetch_all(&self.pool).await?;
+            .fetch_all(&self.pool)
+            .await?;
         Ok(rows)
     }
 

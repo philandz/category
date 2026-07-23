@@ -173,7 +173,8 @@ impl CategoryBiz {
             .get_category(category_id)
             .await
             .map_err(|_| Status::not_found("Category not found"))?;
-        self.assert_member(&db.budget_id, user_id, user_type).await?;
+        self.assert_member(&db.budget_id, user_id, user_type)
+            .await?;
         Ok(map_category(db))
     }
 
