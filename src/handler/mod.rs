@@ -6,8 +6,9 @@ use crate::manager::validate;
 use crate::pb::service::category::{
     category_service_server::CategoryService, ArchiveCategoryRequest, ArchiveCategoryResponse,
     Category, CategoryType, CreateCategoryRequest, DeleteCategoryRequest, DeleteCategoryResponse,
-    GetCategoryRequest, GetCategoryResponse, ListCategoriesAdminRequest, ListCategoriesAdminResponse,
-    ListCategoriesRequest, ListCategoriesResponse, UpdateCategoryRequest,
+    GetCategoryRequest, GetCategoryResponse, ListCategoriesAdminRequest,
+    ListCategoriesAdminResponse, ListCategoriesRequest, ListCategoriesResponse,
+    UpdateCategoryRequest,
 };
 
 pub struct CategoryHandler {
@@ -20,7 +21,7 @@ impl CategoryHandler {
     }
 }
 
-    #[tonic::async_trait]
+#[tonic::async_trait]
 impl CategoryService for CategoryHandler {
     async fn create_category(
         &self,
@@ -143,7 +144,10 @@ impl CategoryService for CategoryHandler {
         request: Request<ListCategoriesAdminRequest>,
     ) -> Result<Response<ListCategoriesAdminResponse>, Status> {
         let req = request.into_inner();
-        let categories = self.biz.list_categories_admin(&req.budget_id, &req.kind).await?;
+        let categories = self
+            .biz
+            .list_categories_admin(&req.budget_id, &req.kind)
+            .await?;
         Ok(Response::new(ListCategoriesAdminResponse { categories }))
     }
 }
