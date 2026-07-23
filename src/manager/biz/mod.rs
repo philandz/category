@@ -99,6 +99,7 @@ impl CategoryBiz {
         Ok(map_category(db))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_category(
         &self,
         user_id: &str,
