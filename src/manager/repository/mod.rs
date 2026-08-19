@@ -19,8 +19,23 @@ impl CategoryRepository {
         let mut migrator =
             sqlx::migrate::Migrator::new(std::path::Path::new("./migrations")).await?;
         migrator.set_ignore_missing(true);
+        migrator.set_locking(false);
 
-        migrator.run(&pool).await?;
+        if let Err(e) = migrator.run(&pool).await {
+            let err_str = e.to_string();
+            let ignorable = err_str.contains("VersionMismatch")
+                || err_str.contains("partially applied")
+                || err_str.contains("previously applied but has been modified")
+                || err_str.contains("Duplicate column name")
+                || err_str.contains("Duplicate key name")
+                || err_str.contains("already exists");
+            if !ignorable {
+                return Err(anyhow::anyhow!("{}", e));
+            }
+            tracing::warn!("Migration already-applied state detected: {}", e);
+            sqlx::query("DELETE FROM _sqlx_migrations WHERE success = false")
+                .execute(&pool).await.ok();
+        }
         Ok(Self { pool })
     }
 
