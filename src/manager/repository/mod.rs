@@ -34,7 +34,9 @@ impl CategoryRepository {
             }
             tracing::warn!("Migration already-applied state detected: {}", e);
             sqlx::query("DELETE FROM _sqlx_migrations WHERE success = false")
-                .execute(&pool).await.ok();
+                .execute(&pool)
+                .await
+                .ok();
         }
         Ok(Self { pool })
     }
@@ -273,12 +275,39 @@ impl CategoryRepository {
         Ok(rows.into_iter().collect())
     }
 
+    /// Overrides for several periods at once: `(period_start, category_id) -> amount`.
+    pub async fn period_overrides_range(
+        &self,
+        budget_id: &str,
+        period_starts: &[String],
+    ) -> Result<std::collections::HashMap<(String, String), i64>> {
+        if period_starts.is_empty() {
+            return Ok(Default::default());
+        }
+        let placeholders = period_starts
+            .iter()
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT period_start, category_id, planned_amount FROM category_period_plans
+             WHERE budget_id = ? AND period_start IN ({placeholders})"
+        );
+        let mut q = sqlx::query_as::<_, (String, String, i64)>(&sql).bind(budget_id);
+        for p in period_starts {
+            q = q.bind(p);
+        }
+        let rows = q.fetch_all(&self.pool).await?;
+        Ok(rows.into_iter().map(|(p, c, a)| ((p, c), a)).collect())
+    }
+
     pub async fn get_unallocated(&self, budget_id: &str) -> Result<i64> {
-        let v: Option<(i64,)> =
-            sqlx::query_as("SELECT unallocated_planned FROM budget_plan_settings WHERE budget_id = ?")
-                .bind(budget_id)
-                .fetch_optional(&self.pool)
-                .await?;
+        let v: Option<(i64,)> = sqlx::query_as(
+            "SELECT unallocated_planned FROM budget_plan_settings WHERE budget_id = ?",
+        )
+        .bind(budget_id)
+        .fetch_optional(&self.pool)
+        .await?;
         Ok(v.map(|(x,)| x).unwrap_or(0))
     }
 
@@ -306,12 +335,14 @@ impl CategoryRepository {
             }
             match scope {
                 PlanScope::Default => {
-                    sqlx::query("UPDATE categories SET planned_amount = ?, updated_at = ? WHERE id = ?")
-                        .bind(amount)
-                        .bind(now)
-                        .bind(category_id)
-                        .execute(&mut *tx)
-                        .await?;
+                    sqlx::query(
+                        "UPDATE categories SET planned_amount = ?, updated_at = ? WHERE id = ?",
+                    )
+                    .bind(amount)
+                    .bind(now)
+                    .bind(category_id)
+                    .execute(&mut *tx)
+                    .await?;
                 }
                 PlanScope::ThisPeriod => {
                     sqlx::query(
