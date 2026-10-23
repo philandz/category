@@ -17,6 +17,7 @@ pub struct PlanRow {
     pub color: String,
     pub planned_amount: Option<i64>,
     pub archived: bool,
+    pub created_at: i64,
 }
 
 /// Period `offset` periods away from the one containing `today`.
@@ -53,6 +54,7 @@ pub fn build_plan(
                 period_override,
                 planned,
                 archived: r.archived,
+                created_at: r.created_at,
             }
         })
         .collect();

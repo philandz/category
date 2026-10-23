@@ -249,7 +249,7 @@ impl CategoryRepository {
 
     pub async fn list_plan_rows(&self, budget_id: &str) -> Result<Vec<DbPlanRow>> {
         let rows = sqlx::query_as::<_, DbPlanRow>(
-            "SELECT id, name, kind, icon, color, planned_amount, archived
+            "SELECT id, name, kind, icon, color, planned_amount, archived, created_at
              FROM categories WHERE budget_id = ? AND deleted_at IS NULL
              ORDER BY kind ASC, name ASC",
         )
@@ -439,6 +439,7 @@ pub struct DbPlanRow {
     pub color: String,
     pub planned_amount: Option<i64>,
     pub archived: bool,
+    pub created_at: i64,
 }
 
 #[derive(Debug)]

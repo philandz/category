@@ -136,6 +136,7 @@ impl CategoryBiz {
                 color: r.color,
                 planned_amount: r.planned_amount,
                 archived: r.archived,
+                created_at: r.created_at,
             })
             .collect();
         Ok(plan::build_plan(
@@ -216,6 +217,7 @@ impl CategoryBiz {
                 color: r.color,
                 planned_amount: r.planned_amount,
                 archived: r.archived,
+                created_at: r.created_at,
             })
             .collect();
         Ok(periods

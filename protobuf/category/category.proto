@@ -101,6 +101,7 @@ message CategoryPlan {
   optional int64 period_override = 7; // set when this period has its own amount
   int64        planned          = 8;  // effective: override if present, else default
   bool         archived         = 9;
+  int64        created_at       = 10; // unix seconds; plans before this do not apply (no fake rollover)
 }
 
 message BudgetPlan {

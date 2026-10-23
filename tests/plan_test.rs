@@ -18,6 +18,7 @@ fn row(id: &str, kind: CategoryType, planned: Option<i64>, archived: bool) -> Pl
         color: "#000".into(),
         planned_amount: planned,
         archived,
+        created_at: 0,
     }
 }
 
