@@ -5,6 +5,14 @@ use tonic::{Request, Status};
 use crate::pb::service::budget::budget_service_client::BudgetServiceClient;
 use crate::pb::service::budget::{BudgetRole, CheckRoleRequest};
 
+/// Role plus the budget's period settings, from one CheckRole call.
+#[derive(Debug, Clone)]
+pub struct RoleCtx {
+    pub role: BudgetRole,
+    pub period_start_day: u8,
+    pub timezone: String,
+}
+
 pub struct BudgetClient {
     inner: BudgetServiceClient<Channel>,
 }
@@ -26,6 +34,36 @@ impl BudgetClient {
         Self {
             inner: BudgetServiceClient::new(channel),
         }
+    }
+
+    pub async fn check_role_ctx(
+        &mut self,
+        user_id: &str,
+        budget_id: &str,
+        user_type: Option<&str>,
+    ) -> Result<RoleCtx, Status> {
+        let mut req = Request::new(CheckRoleRequest {
+            user_id: user_id.to_string(),
+            budget_id: budget_id.to_string(),
+        });
+        if let Ok(v) = MetadataValue::try_from(user_id) {
+            req.metadata_mut().insert("x-user-id", v);
+        }
+        if let Some(ut) = user_type {
+            if let Ok(v) = MetadataValue::try_from(ut) {
+                req.metadata_mut().insert("x-user-type", v);
+            }
+        }
+        let r = self.inner.check_role(req).await?.into_inner();
+        Ok(RoleCtx {
+            role: BudgetRole::try_from(r.role).unwrap_or(BudgetRole::Unspecified),
+            period_start_day: (r.period_start_day.clamp(1, 28)) as u8,
+            timezone: if r.timezone.is_empty() {
+                "Asia/Ho_Chi_Minh".to_string()
+            } else {
+                r.timezone
+            },
+        })
     }
 
     pub async fn check_role(
