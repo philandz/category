@@ -76,6 +76,73 @@ message ListCategoriesAdminRequest {
 message ListCategoriesAdminResponse { repeated Category categories = 1; }
 
 // ---------------------------------------------------------------------------
+// Period planning (plan R3)
+// ---------------------------------------------------------------------------
+
+enum PlanScope {
+  PLAN_SCOPE_UNSPECIFIED = 0;
+  PLAN_SCOPE_THIS_PERIOD = 1;  // override for one budget period only
+  PLAN_SCOPE_DEFAULT     = 2;  // new default for every period (categories.planned_amount)
+}
+
+message PlanItem {
+  string    category_id    = 1;
+  int64     planned_amount = 2;  // >= 0
+  PlanScope scope          = 3;
+}
+
+message CategoryPlan {
+  string       category_id      = 1;
+  string       name             = 2;
+  CategoryType kind             = 3;
+  string       icon             = 4;
+  string       color            = 5;
+  int64        default_planned  = 6;  // categories.planned_amount (0 if unset)
+  optional int64 period_override = 7; // set when this period has its own amount
+  int64        planned          = 8;  // effective: override if present, else default
+  bool         archived         = 9;
+}
+
+message BudgetPlan {
+  string budget_id            = 1;
+  string period_from          = 2;  // YYYY-MM-DD inclusive
+  string period_to            = 3;  // YYYY-MM-DD exclusive
+  repeated CategoryPlan categories = 4;
+  int64  unallocated_planned  = 5;  // planned spend with no category
+  int64  total_planned        = 6;  // sum of expense categories + unallocated
+}
+
+message GetPlanRequest {
+  string budget_id     = 1;
+  int32  period_offset = 2;  // 0 = current period, -1 = previous, 1 = next
+}
+
+message SetPeriodPlanRequest {
+  string budget_id     = 1;
+  int32  period_offset = 2;
+  repeated PlanItem items = 3;
+  optional int64 unallocated_planned = 4;
+}
+
+message SeedCategoryItem {
+  string       name           = 1;
+  CategoryType kind           = 2;
+  string       icon           = 3;
+  string       color          = 4;
+  optional int64 planned_amount = 5;
+}
+
+message SeedCategoriesRequest {
+  string budget_id = 1;
+  repeated SeedCategoryItem items = 2;
+}
+
+message SeedCategoriesResponse {
+  int32 created = 1;
+  int32 skipped = 2;  // same name+kind already existed
+}
+
+// ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
 
@@ -98,6 +165,16 @@ service CategoryService {
   rpc ListCategories(ListCategoriesRequest) returns (ListCategoriesResponse) {
     option (google.api.http) = { get: "/budgets/{budget_id}/categories" };
   }
+  // Plan for a budget period: per-category amounts (default + per-period override).
+  rpc GetPlan(GetPlanRequest) returns (BudgetPlan) {
+    option (google.api.http) = { get: "/budgets/{budget_id}/plan" };
+  }
+  // Manager+: set amounts for this period or as the new default.
+  rpc SetPeriodPlan(SetPeriodPlanRequest) returns (BudgetPlan) {
+    option (google.api.http) = { put: "/budgets/{budget_id}/plan" body: "*" };
+  }
+  // Internal, idempotent: create template/default categories (skips same name+kind).
+  rpc SeedCategories(SeedCategoriesRequest) returns (SeedCategoriesResponse) {}
   // Admin: list categories for any budget (super_admin only)
   rpc ListCategoriesAdmin(ListCategoriesAdminRequest) returns (ListCategoriesAdminResponse) {}
 }
