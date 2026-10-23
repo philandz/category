@@ -111,3 +111,14 @@ fn check_amount(v: i64) -> Result<(), Status> {
     }
     Ok(())
 }
+
+/// Legacy envelope limit -> "unallocated" amount: whatever the limit leaves after the
+/// category plans. `None` when the plans already exceed the limit (the caller keeps the
+/// category plans and reports it).
+pub fn unallocated_from_envelope(limit: i64, sum_planned: i64) -> Option<i64> {
+    if sum_planned > limit {
+        None
+    } else {
+        Some(limit - sum_planned)
+    }
+}

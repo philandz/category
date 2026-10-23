@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use category::manager::plan::{build_plan, period_for, validate_items, PlanRow};
+use category::manager::plan::{
+    build_plan, period_for, unallocated_from_envelope, validate_items, PlanRow,
+};
 use category::pb::service::category::{CategoryType, PlanItem, PlanScope};
 use chrono::NaiveDate;
 use tonic::Code;
@@ -132,4 +134,14 @@ fn validate_accepts_both_scopes_for_one_category() {
     )
     .unwrap();
     assert_eq!(out.len(), 2);
+}
+
+#[test]
+fn envelope_becomes_unallocated_only_when_plans_fit() {
+    assert_eq!(
+        unallocated_from_envelope(10_000_000, 7_000_000),
+        Some(3_000_000)
+    );
+    assert_eq!(unallocated_from_envelope(5_000_000, 5_000_000), Some(0));
+    assert_eq!(unallocated_from_envelope(5_000_000, 6_000_000), None);
 }
