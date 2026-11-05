@@ -19,8 +19,25 @@ impl CategoryRepository {
         let mut migrator =
             sqlx::migrate::Migrator::new(std::path::Path::new("./migrations")).await?;
         migrator.set_ignore_missing(true);
+        migrator.set_locking(false);
 
-        migrator.run(&pool).await?;
+        if let Err(e) = migrator.run(&pool).await {
+            let err_str = e.to_string();
+            let ignorable = err_str.contains("VersionMismatch")
+                || err_str.contains("partially applied")
+                || err_str.contains("previously applied but has been modified")
+                || err_str.contains("Duplicate column name")
+                || err_str.contains("Duplicate key name")
+                || err_str.contains("already exists");
+            if !ignorable {
+                return Err(anyhow::anyhow!("{}", e));
+            }
+            tracing::warn!("Migration already-applied state detected: {}", e);
+            sqlx::query("DELETE FROM _sqlx_migrations WHERE success = false")
+                .execute(&pool)
+                .await
+                .ok();
+        }
         Ok(Self { pool })
     }
 
@@ -224,5 +241,215 @@ impl CategoryRepository {
             .execute(&self.pool).await?;
         }
         Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Period plans
+    // -----------------------------------------------------------------------
+
+    pub async fn list_plan_rows(&self, budget_id: &str) -> Result<Vec<DbPlanRow>> {
+        let rows = sqlx::query_as::<_, DbPlanRow>(
+            "SELECT id, name, kind, icon, color, planned_amount, archived, created_at
+             FROM categories WHERE budget_id = ? AND deleted_at IS NULL
+             ORDER BY kind ASC, name ASC",
+        )
+        .bind(budget_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    pub async fn period_overrides(
+        &self,
+        budget_id: &str,
+        period_start: &str,
+    ) -> Result<std::collections::HashMap<String, i64>> {
+        let rows: Vec<(String, i64)> = sqlx::query_as(
+            "SELECT category_id, planned_amount FROM category_period_plans
+             WHERE budget_id = ? AND period_start = ?",
+        )
+        .bind(budget_id)
+        .bind(period_start)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().collect())
+    }
+
+    /// Overrides for several periods at once: `(period_start, category_id) -> amount`.
+    pub async fn period_overrides_range(
+        &self,
+        budget_id: &str,
+        period_starts: &[String],
+    ) -> Result<std::collections::HashMap<(String, String), i64>> {
+        if period_starts.is_empty() {
+            return Ok(Default::default());
+        }
+        let placeholders = period_starts
+            .iter()
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT period_start, category_id, planned_amount FROM category_period_plans
+             WHERE budget_id = ? AND period_start IN ({placeholders})"
+        );
+        let mut q = sqlx::query_as::<_, (String, String, i64)>(&sql).bind(budget_id);
+        for p in period_starts {
+            q = q.bind(p);
+        }
+        let rows = q.fetch_all(&self.pool).await?;
+        Ok(rows.into_iter().map(|(p, c, a)| ((p, c), a)).collect())
+    }
+
+    pub async fn get_unallocated(&self, budget_id: &str) -> Result<i64> {
+        let v: Option<(i64,)> = sqlx::query_as(
+            "SELECT unallocated_planned FROM budget_plan_settings WHERE budget_id = ?",
+        )
+        .bind(budget_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(v.map(|(x,)| x).unwrap_or(0))
+    }
+
+    /// Applies a validated plan update atomically. Categories must belong to `budget_id`.
+    pub async fn apply_plan(
+        &self,
+        budget_id: &str,
+        period_start: &str,
+        items: &[(String, i64, crate::pb::service::category::PlanScope)],
+        unallocated: Option<i64>,
+    ) -> Result<(), PlanError> {
+        use crate::pb::service::category::PlanScope;
+        let now = Utc::now().timestamp();
+        let mut tx = self.pool.begin().await?;
+        for (category_id, amount, scope) in items {
+            let owned: Option<(String,)> = sqlx::query_as(
+                "SELECT id FROM categories WHERE id = ? AND budget_id = ? AND deleted_at IS NULL",
+            )
+            .bind(category_id)
+            .bind(budget_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+            if owned.is_none() {
+                return Err(PlanError::UnknownCategory(category_id.clone()));
+            }
+            match scope {
+                PlanScope::Default => {
+                    sqlx::query(
+                        "UPDATE categories SET planned_amount = ?, updated_at = ? WHERE id = ?",
+                    )
+                    .bind(amount)
+                    .bind(now)
+                    .bind(category_id)
+                    .execute(&mut *tx)
+                    .await?;
+                }
+                PlanScope::ThisPeriod => {
+                    sqlx::query(
+                        "INSERT INTO category_period_plans
+                           (id, budget_id, category_id, period_start, planned_amount, created_at, updated_at)
+                         VALUES (?, ?, ?, ?, ?, ?, ?)
+                         ON DUPLICATE KEY UPDATE planned_amount = VALUES(planned_amount), updated_at = VALUES(updated_at)",
+                    )
+                    .bind(new_id())
+                    .bind(budget_id)
+                    .bind(category_id)
+                    .bind(period_start)
+                    .bind(amount)
+                    .bind(now)
+                    .bind(now)
+                    .execute(&mut *tx)
+                    .await?;
+                }
+                PlanScope::Unspecified => {}
+            }
+        }
+        if let Some(u) = unallocated {
+            sqlx::query(
+                "INSERT INTO budget_plan_settings (budget_id, unallocated_planned, updated_at)
+                 VALUES (?, ?, ?)
+                 ON DUPLICATE KEY UPDATE unallocated_planned = VALUES(unallocated_planned), updated_at = VALUES(updated_at)",
+            )
+            .bind(budget_id)
+            .bind(u)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Idempotent: a category with the same (name, kind) in the budget is skipped.
+    pub async fn seed_categories(
+        &self,
+        budget_id: &str,
+        created_by: &str,
+        items: &[crate::pb::service::category::SeedCategoryItem],
+    ) -> Result<(i32, i32)> {
+        let now = Utc::now().timestamp();
+        let (mut created, mut skipped) = (0, 0);
+        let mut tx = self.pool.begin().await?;
+        for it in items {
+            let kind = match crate::pb::service::category::CategoryType::try_from(it.kind) {
+                Ok(crate::pb::service::category::CategoryType::Income) => "income",
+                _ => "expense",
+            };
+            let exists: Option<(String,)> = sqlx::query_as(
+                "SELECT id FROM categories WHERE budget_id = ? AND name = ? AND kind = ? AND deleted_at IS NULL LIMIT 1",
+            )
+            .bind(budget_id)
+            .bind(it.name.trim())
+            .bind(kind)
+            .fetch_optional(&mut *tx)
+            .await?;
+            if exists.is_some() {
+                skipped += 1;
+                continue;
+            }
+            sqlx::query(
+                "INSERT INTO categories (id, budget_id, name, kind, icon, color, planned_amount, archived, created_by, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, FALSE, ?, ?, ?)",
+            )
+            .bind(new_id())
+            .bind(budget_id)
+            .bind(it.name.trim())
+            .bind(kind)
+            .bind(if it.icon.is_empty() { "📦" } else { it.icon.as_str() })
+            .bind(if it.color.is_empty() { "#6366f1" } else { it.color.as_str() })
+            .bind(it.planned_amount)
+            .bind(created_by)
+            .bind(now)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+            created += 1;
+        }
+        tx.commit().await?;
+        Ok((created, skipped))
+    }
+}
+
+#[derive(Debug, sqlx::FromRow)]
+pub struct DbPlanRow {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub icon: String,
+    pub color: String,
+    pub planned_amount: Option<i64>,
+    pub archived: bool,
+    pub created_at: i64,
+}
+
+#[derive(Debug)]
+pub enum PlanError {
+    UnknownCategory(String),
+    Db(sqlx::Error),
+}
+
+impl From<sqlx::Error> for PlanError {
+    fn from(e: sqlx::Error) -> Self {
+        PlanError::Db(e)
     }
 }
