@@ -5,10 +5,11 @@ use crate::manager::biz::CategoryBiz;
 use crate::manager::validate;
 use crate::pb::service::category::{
     category_service_server::CategoryService, ArchiveCategoryRequest, ArchiveCategoryResponse,
-    Category, CategoryType, CreateCategoryRequest, DeleteCategoryRequest, DeleteCategoryResponse,
-    GetCategoryRequest, GetCategoryResponse, ListCategoriesAdminRequest,
-    ListCategoriesAdminResponse, ListCategoriesRequest, ListCategoriesResponse,
-    UpdateCategoryRequest,
+    BudgetPlan, Category, CategoryType, CreateCategoryRequest, DeleteCategoryRequest,
+    DeleteCategoryResponse, GetCategoryRequest, GetCategoryResponse, GetPlanRangeRequest,
+    GetPlanRangeResponse, GetPlanRequest, ListCategoriesAdminRequest, ListCategoriesAdminResponse,
+    ListCategoriesRequest, ListCategoriesResponse, SeedCategoriesRequest, SeedCategoriesResponse,
+    SetPeriodPlanRequest, UpdateCategoryRequest,
 };
 
 pub struct CategoryHandler {
@@ -149,5 +150,71 @@ impl CategoryService for CategoryHandler {
             .list_categories_admin(&req.budget_id, &req.kind)
             .await?;
         Ok(Response::new(ListCategoriesAdminResponse { categories }))
+    }
+
+    async fn get_plan(
+        &self,
+        request: Request<GetPlanRequest>,
+    ) -> Result<Response<BudgetPlan>, Status> {
+        let user_id = validate::user_id_from_metadata(request.metadata())?;
+        let user_type = validate::user_type_from_metadata(request.metadata());
+        let req = request.into_inner();
+        let plan = self
+            .biz
+            .get_plan(
+                &user_id,
+                &req.budget_id,
+                req.period_offset,
+                user_type.as_deref(),
+            )
+            .await?;
+        Ok(Response::new(plan))
+    }
+
+    async fn set_period_plan(
+        &self,
+        request: Request<SetPeriodPlanRequest>,
+    ) -> Result<Response<BudgetPlan>, Status> {
+        let user_id = validate::user_id_from_metadata(request.metadata())?;
+        let user_type = validate::user_type_from_metadata(request.metadata());
+        let plan = self
+            .biz
+            .set_period_plan(&user_id, request.into_inner(), user_type.as_deref())
+            .await?;
+        Ok(Response::new(plan))
+    }
+
+    async fn seed_categories(
+        &self,
+        request: Request<SeedCategoriesRequest>,
+    ) -> Result<Response<SeedCategoriesResponse>, Status> {
+        let user_id = validate::user_id_from_metadata(request.metadata())?;
+        let user_type = validate::user_type_from_metadata(request.metadata());
+        let req = request.into_inner();
+        let out = self
+            .biz
+            .seed_categories(&user_id, &req.budget_id, &req.items, user_type.as_deref())
+            .await?;
+        Ok(Response::new(out))
+    }
+
+    async fn get_plan_range(
+        &self,
+        request: Request<GetPlanRangeRequest>,
+    ) -> Result<Response<GetPlanRangeResponse>, Status> {
+        let user_id = validate::user_id_from_metadata(request.metadata())?;
+        let user_type = validate::user_type_from_metadata(request.metadata());
+        let req = request.into_inner();
+        let plans = self
+            .biz
+            .get_plan_range(
+                &user_id,
+                &req.budget_id,
+                req.from_offset,
+                req.to_offset,
+                user_type.as_deref(),
+            )
+            .await?;
+        Ok(Response::new(GetPlanRangeResponse { plans }))
     }
 }

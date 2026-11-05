@@ -5,9 +5,13 @@ use tonic::Status;
 
 use crate::converters::map_category;
 use crate::manager::client::BudgetClient;
+use crate::manager::plan::{self, PlanRow};
 use crate::manager::repository::CategoryRepository;
 use crate::pb::service::budget::BudgetRole;
-use crate::pb::service::category::{Category, CategoryType};
+use crate::pb::service::category::{
+    BudgetPlan, Category, CategoryType, SeedCategoriesResponse, SeedCategoryItem,
+    SetPeriodPlanRequest,
+};
 
 pub struct CategoryBiz {
     pub repo: Arc<CategoryRepository>,
@@ -64,6 +68,222 @@ impl CategoryBiz {
             return Err(Status::permission_denied("Requires Manager role or higher"));
         }
         Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Period plan
+    // -----------------------------------------------------------------------
+
+    async fn period_of_budget(
+        &self,
+        user_id: &str,
+        budget_id: &str,
+        user_type: Option<&str>,
+        offset: i32,
+    ) -> Result<
+        (
+            crate::manager::client::RoleCtx,
+            (chrono::NaiveDate, chrono::NaiveDate),
+        ),
+        Status,
+    > {
+        use chrono::TimeZone;
+        let ctx = self
+            .budget_client
+            .lock()
+            .await
+            .check_role_ctx(user_id, budget_id, user_type)
+            .await?;
+        if ctx.role == BudgetRole::Unspecified {
+            return Err(Status::permission_denied("Not a member of this budget"));
+        }
+        let tz: chrono_tz::Tz = ctx.timezone.parse().unwrap_or(chrono_tz::Asia::Ho_Chi_Minh);
+        let today = tz
+            .from_utc_datetime(&chrono::Utc::now().naive_utc())
+            .date_naive();
+        let period = plan::period_for(today, ctx.period_start_day, offset.clamp(-120, 120));
+        Ok((ctx, period))
+    }
+
+    async fn load_plan(
+        &self,
+        budget_id: &str,
+        period: (chrono::NaiveDate, chrono::NaiveDate),
+    ) -> Result<BudgetPlan, Status> {
+        let from = philand_time::period::ymd(period.0);
+        let rows = self
+            .repo
+            .list_plan_rows(budget_id)
+            .await
+            .map_err(Self::internal)?;
+        let overrides = self
+            .repo
+            .period_overrides(budget_id, &from)
+            .await
+            .map_err(Self::internal)?;
+        let unallocated = self
+            .repo
+            .get_unallocated(budget_id)
+            .await
+            .map_err(Self::internal)?;
+        let rows = rows
+            .into_iter()
+            .map(|r| PlanRow {
+                id: r.id,
+                name: r.name,
+                kind: crate::converters::kind_from_db(&r.kind),
+                icon: r.icon,
+                color: r.color,
+                planned_amount: r.planned_amount,
+                archived: r.archived,
+                created_at: r.created_at,
+            })
+            .collect();
+        Ok(plan::build_plan(
+            budget_id,
+            period,
+            rows,
+            &overrides,
+            unallocated,
+        ))
+    }
+
+    pub async fn get_plan(
+        &self,
+        user_id: &str,
+        budget_id: &str,
+        offset: i32,
+        user_type: Option<&str>,
+    ) -> Result<BudgetPlan, Status> {
+        let (_, period) = self
+            .period_of_budget(user_id, budget_id, user_type, offset)
+            .await?;
+        self.load_plan(budget_id, period).await
+    }
+
+    /// Internal: plans for `from_offset..=to_offset` (oldest first), one role check and one
+    /// overrides query. Used by insight to compute rollover.
+    pub async fn get_plan_range(
+        &self,
+        user_id: &str,
+        budget_id: &str,
+        from_offset: i32,
+        to_offset: i32,
+        user_type: Option<&str>,
+    ) -> Result<Vec<BudgetPlan>, Status> {
+        if from_offset > to_offset || (to_offset - from_offset) >= 24 {
+            return Err(Status::invalid_argument(
+                "offset range must be ordered and span at most 24 periods",
+            ));
+        }
+        let (ctx, _) = self
+            .period_of_budget(user_id, budget_id, user_type, 0)
+            .await?;
+        let today = {
+            use chrono::TimeZone;
+            let tz: chrono_tz::Tz = ctx.timezone.parse().unwrap_or(chrono_tz::Asia::Ho_Chi_Minh);
+            tz.from_utc_datetime(&chrono::Utc::now().naive_utc())
+                .date_naive()
+        };
+        let periods: Vec<_> = (from_offset..=to_offset)
+            .map(|o| plan::period_for(today, ctx.period_start_day, o))
+            .collect();
+        let starts: Vec<String> = periods
+            .iter()
+            .map(|p| philand_time::period::ymd(p.0))
+            .collect();
+        let overrides = self
+            .repo
+            .period_overrides_range(budget_id, &starts)
+            .await
+            .map_err(Self::internal)?;
+        let rows = self
+            .repo
+            .list_plan_rows(budget_id)
+            .await
+            .map_err(Self::internal)?;
+        let unallocated = self
+            .repo
+            .get_unallocated(budget_id)
+            .await
+            .map_err(Self::internal)?;
+        let rows: Vec<PlanRow> = rows
+            .into_iter()
+            .map(|r| PlanRow {
+                id: r.id,
+                name: r.name,
+                kind: crate::converters::kind_from_db(&r.kind),
+                icon: r.icon,
+                color: r.color,
+                planned_amount: r.planned_amount,
+                archived: r.archived,
+                created_at: r.created_at,
+            })
+            .collect();
+        Ok(periods
+            .into_iter()
+            .zip(starts)
+            .map(|(period, start)| {
+                let per: std::collections::HashMap<String, i64> = overrides
+                    .iter()
+                    .filter(|((p, _), _)| *p == start)
+                    .map(|((_, c), a)| (c.clone(), *a))
+                    .collect();
+                plan::build_plan(budget_id, period, rows.clone(), &per, unallocated)
+            })
+            .collect())
+    }
+
+    pub async fn set_period_plan(
+        &self,
+        user_id: &str,
+        req: SetPeriodPlanRequest,
+        user_type: Option<&str>,
+    ) -> Result<BudgetPlan, Status> {
+        let items = plan::validate_items(&req.items, req.unallocated_planned)?;
+        let (ctx, period) = self
+            .period_of_budget(user_id, &req.budget_id, user_type, req.period_offset)
+            .await?;
+        if !matches!(ctx.role, BudgetRole::Owner | BudgetRole::Manager) {
+            return Err(Status::permission_denied("Requires Manager role or higher"));
+        }
+        self.repo
+            .apply_plan(
+                &req.budget_id,
+                &philand_time::period::ymd(period.0),
+                &items,
+                req.unallocated_planned,
+            )
+            .await
+            .map_err(|e| match e {
+                crate::manager::repository::PlanError::UnknownCategory(id) => {
+                    Status::not_found(format!("category {id} not found in this budget"))
+                }
+                crate::manager::repository::PlanError::Db(e) => Self::internal(e),
+            })?;
+        self.load_plan(&req.budget_id, period).await
+    }
+
+    pub async fn seed_categories(
+        &self,
+        user_id: &str,
+        budget_id: &str,
+        items: &[SeedCategoryItem],
+        user_type: Option<&str>,
+    ) -> Result<SeedCategoriesResponse, Status> {
+        self.assert_manager(budget_id, user_id, user_type).await?;
+        if items.len() > 100 {
+            return Err(Status::invalid_argument("too many categories (max 100)"));
+        }
+        for it in items {
+            crate::manager::validate::category_name(&it.name)?;
+        }
+        let (created, skipped) = self
+            .repo
+            .seed_categories(budget_id, user_id, items)
+            .await
+            .map_err(Self::internal)?;
+        Ok(SeedCategoriesResponse { created, skipped })
     }
 
     // -----------------------------------------------------------------------
